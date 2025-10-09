@@ -14,9 +14,9 @@ TMDB_API_KEY = config_data["TMDB_API_KEY"]
 themoviedb.api_key = TMDB_API_KEY
 
 #Load Data
-movies_dict = pickle.load(open('../movie_dict.pkl', 'rb'))
+movies_dict = pickle.load(open('movie_dict.pkl', 'rb'))
 movies = pd.DataFrame(movies_dict)
-similarity = pickle.load(open('../similarity.pkl', 'rb'))
+similarity = pickle.load(open('similarity.pkl', 'rb'))
 
 #Poster Fetching
 @st.cache_data(show_spinner=False)
