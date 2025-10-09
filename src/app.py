@@ -1,20 +1,27 @@
+import os
+import json
+
 import streamlit as st
 import pickle
 import pandas as pd
 import requests
+import themoviedb
+
+# configuring TMDB - api key
+working_dir = os.path.dirname(os.path.abspath(__file__))
+config_data = json.load(open(f"{working_dir}/config.json"))
+TMDB_API_KEY = config_data["TMDB_API_KEY"]
+themoviedb.api_key = TMDB_API_KEY
 
 #Load Data
-movies_dict = pickle.load(open('movie_dict.pkl', 'rb'))
+movies_dict = pickle.load(open('../movie_dict.pkl', 'rb'))
 movies = pd.DataFrame(movies_dict)
-similarity = pickle.load(open('similarity.pkl', 'rb'))
-
-#TMDB API Key
-API_KEY = "f53b7c92f4dcaab7b6ce75a41b33990c"
+similarity = pickle.load(open('../similarity.pkl', 'rb'))
 
 #Poster Fetching
 @st.cache_data(show_spinner=False)
 def fetch_poster(movie_id):
-    url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={API_KEY}&language=en-US"
+    url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={TMDB_API_KEY}&language=en-US"
     try:
         response = requests.get(url, timeout=10)
         data = response.json()
