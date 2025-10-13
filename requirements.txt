@@ -1,0 +1,7 @@
+streamlit==1.50.0
+pandas==2.3.3
+numpy==2.3.3
+requests==2.32.5
+aiohttp==3.8.6
+themoviedb==0.3.1
+pickle5==0.0.12
