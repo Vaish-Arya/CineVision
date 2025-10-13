@@ -1,60 +1,90 @@
 import os
 import json
-
-import streamlit as st
 import pickle
 import pandas as pd
-import requests
+import streamlit as st
+import asyncio
+import aiohttp
 import themoviedb
 
-# configuring TMDB - api key
-working_dir = os.path.dirname(os.path.abspath(__file__))
-config_data = json.load(open(f"{working_dir}/config.json"))
+# ------------------------------
+# TMDB API Key
+# ------------------------------
+config_data = json.load(open("config.json"))
 TMDB_API_KEY = config_data["TMDB_API_KEY"]
 themoviedb.api_key = TMDB_API_KEY
 
-#Load Data
+# ------------------------------
+# Load Data
+# ------------------------------
 movies_dict = pickle.load(open('movie_dict.pkl', 'rb'))
 movies = pd.DataFrame(movies_dict)
 similarity = pickle.load(open('similarity.pkl', 'rb'))
 
-#Poster Fetching
-@st.cache_data(show_spinner=False)
-def fetch_poster(movie_id):
+# ------------------------------
+# Async poster fetching
+# ------------------------------
+async def fetch_poster_async(session, movie_id):
     url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={TMDB_API_KEY}&language=en-US"
     try:
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        poster_path = data.get('poster_path')
-        if poster_path:
-            return "https://image.tmdb.org/t/p/w500" + poster_path
-        else:
-            return "https://via.placeholder.com/500x750?text=No+Image"
+        async with session.get(url, timeout=10) as response:
+            data = await response.json()
+            poster_path = data.get('poster_path')
+            poster_url = "https://image.tmdb.org/t/p/w500" + poster_path if poster_path else "https://via.placeholder.com/500x750?text=No+Image"
+            return movie_id, poster_url
     except:
-        return "https://via.placeholder.com/500x750?text=No+Image"
+        return movie_id, "https://via.placeholder.com/500x750?text=No+Image"
 
-#Recommendation Function
+async def fetch_all_posters(movie_ids):
+    poster_dict = {}
+    async with aiohttp.ClientSession() as session:
+        tasks = [fetch_poster_async(session, mid) for mid in movie_ids]
+        for future in asyncio.as_completed(tasks):
+            movie_id, poster_url = await future
+            poster_dict[movie_id] = poster_url
+    return poster_dict
+
+# ------------------------------
+# Precompute posters at startup
+# ------------------------------
+@st.cache_data
+def get_posters():
+    return asyncio.run(fetch_all_posters(movies['movie_id']))
+
+poster_dict = get_posters()
+
+# ------------------------------
+# Recommendation Function
+# ------------------------------
 def recommend(movie):
     movie = movie.lower().strip()
     if movie not in movies['title'].str.lower().values:
         return []
 
-    movie_index = movies[movies['title'].str.lower() == movie].index[0]
-    distances = similarity[movie_index]
-    movies_list = sorted(list(enumerate(distances)), reverse=True, key=lambda x: x[1])[1:6]
+    idx = movies[movies['title'].str.lower() == movie].index[0]
+    distances = similarity[idx]
+    top5 = sorted(list(enumerate(distances)), reverse=True, key=lambda x: x[1])[1:6]
 
-    recommended_movies = []
-    recommended_posters = []
-    for i in movies_list:
-        movie_id = movies.iloc[i[0]].movie_id
-        recommended_movies.append(movies.iloc[i[0]].title)
-        recommended_posters.append(fetch_poster(movie_id))
-    return recommended_movies, recommended_posters
+    recommendations = []
+    for i in top5:
+        m = movies.iloc[i[0]]
+        recommendations.append({
+            'title': m.title,
+            'poster': poster_dict[m.movie_id]
+        })
+    return recommendations
 
-#Streamlit Page Config
+# ------------------------------
+# Streamlit App
+# ------------------------------
 st.set_page_config(page_title="CineVision", page_icon="🎥", layout="wide")
+st.title("🎥 CineVision")
+st.markdown("_Intelligent Movie Recommendations Powered by Machine Learning_")
+st.markdown("Get **top 5 movie recommendations** based on your selection!")
 
-#CSS
+# ------------------------------
+# CSS Styling (existing style)
+# ------------------------------
 st.markdown("""
 <style>
 :root {
@@ -63,7 +93,6 @@ st.markdown("""
     --text-color: #2e2e2e;
     --primary-color: #6a5acd;
     --secondary-color: #87ceeb;
-    --accent-color: #ffb6c1;
     --card-bg: #ffffff;
     --shadow: rgba(0, 0, 0, 0.1);
 }
@@ -117,6 +146,13 @@ h1, h2, h3 {
 }
 
 /* Movie card styling */
+.movie-card {
+    text-align: center;
+    font-weight: 500;
+    font-size: 0.85rem;
+    color: var(--text-color);
+    margin-bottom: 1rem;
+}
 .movie-card img {
     border-radius: 12px;
     background-color: var(--card-bg);
@@ -128,14 +164,10 @@ h1, h2, h3 {
     transform: translateY(-4px);
     box-shadow: 0 6px 16px var(--shadow);
 }
-
 /* Movie title */
-.movie-card p {
-    text-align: center;
-    font-weight: 500;
-    font-size: 0.85rem;
-    color: var(--text-color);
-    margin-top: 0.3rem;
+.movie-card .title {
+    font-weight: 600;
+    font-size: 1rem;
 }
 
 /* Spinner color and centering */
@@ -153,36 +185,36 @@ h1, h2, h3 {
 .stSpinner > div > div {
     border-top-color: var(--primary-color);
 }
-
 </style>
 """, unsafe_allow_html=True)
 
-#Main Page
-st.title("🎥 CineVision")
-st.markdown("_Intelligent Movie Recommendations Powered by Machine Learning_")
-st.markdown("Get **top 5 movie recommendations** based on your selection!")
-
-#Centered Movie Selection
+# ------------------------------
+# Centered Movie Selection
+# ------------------------------
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     selected_movie = st.selectbox("Select a movie:", movies['title'].values)
     recommend_button = st.button("Show Recommendations")
 
-#Recommendations
+# ------------------------------
+# Show Recommendations
+# ------------------------------
 if recommend_button:
-    with st.spinner("Fetching recommendations..."):
-        recommendations = recommend(selected_movie)
-
+    recommendations = recommend(selected_movie)
     if recommendations:
-        names, posters = recommendations
-        st.markdown("### 🍿Recommended Movies:")
+        st.markdown("### 🍿 Recommended Movies:")
         cols = st.columns(5, gap="medium")
-        for i, col in enumerate(cols[:len(names)]):
+        for rec, col in zip(recommendations, cols):
             with col:
-                poster_url = posters[i] if i < len(posters) else "https://via.placeholder.com/500x750?text=No+Image"
-                st.image(poster_url, use_container_width=True, width=150)
-                st.markdown(f"**{names[i]}**")
-
+                st.markdown(
+                    f"""
+                    <div class="movie-card">
+                        <img src="{rec['poster']}" width="stretch">
+                        <div class="title">{rec['title']}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
     else:
         st.error("😔 Movie not found in dataset! Try another movie.")
         st.info("Tip: Make sure spelling matches or choose from the dropdown.")
